@@ -1,11 +1,6 @@
 import numpy as np
-from util import build_deck, CambioState
+from gym.util import build_deck, CambioState, calculate_state_value
 import random
-import itertools
-from randomAgent import RandomAgent
-import time
-from qagentclade import CambioQAgent
-from qlearnAgent import QAgent
 
 
 class CambioEnv:
@@ -56,9 +51,14 @@ class CambioEnv:
         self.game_state = CambioState.NOT_CALLED
 
         if self.mode != 'full':
-            self.deck  = self.deck * 2
+            self.deck = self.deck * 2
         
         random.shuffle(self.deck)
+
+        self.agents.append(self.agents.pop(0))
+        for a in self.agents:
+            a.clear_memory()
+            a.change_num()
 
         for p in range(self.PLAYERS):
             for _ in range(self.HAND_SIZE):
@@ -89,24 +89,33 @@ class CambioEnv:
             return None
 
         elif self.open_action == 1: # Peek Own
-            self.peek_card(target)
+            if len(self.player_hands[self.player_turn]) == 0:
+                return self.known_hands[self.player_turn], self.open_action
+
+            self.peek_card(target, self.player_turn)
 
         elif self.open_action == 2: # Peek Other
-            self.peek_card(target)
+            if len(self.player_hands[(self.player_turn + 1) % 2]) == 0:
+                return self.known_hands[self.player_turn], self.open_action
+
+            self.peek_card(target, (self.player_turn + 1) % 2)
 
         elif self.open_action == 3: # Swap Blind
+            if len(self.player_hands[self.player_turn]) == 0 or len(self.player_hands[(self.player_turn + 1) % 2]) == 0:
+                return self.known_hands[self.player_turn], self.open_action
             target1, target2 = target
             self.swap_card(target1, target2)
 
         elif self.open_action == 4: # Swap and Look
+            if len(self.player_hands[self.player_turn]) == 0 or len(self.player_hands[(self.player_turn + 1) % 2]) == 0:
+                return self.known_hands[self.player_turn], self.open_action
             target1, target2 = target
             self.swap_card(target1, target2)
-            self.peek_card(target2)
+            self.peek_card(target2, self.player_turn)
 
         return self.known_hands[self.player_turn], self.open_action
 
-
-    # Game maintencence Actions
+    # Game Order Actions
     def next_turn(self):
         self.turn_count += 1
         """Begins next turn, prompts agents to make moves"""
@@ -115,22 +124,116 @@ class CambioEnv:
         elif self.game_state == CambioState.LAST_TURN:
             final_vals = self.tally_hands()
             winner = np.argmax(final_vals)
+            for i, agent in enumerate(self.agents):
+                agent.pass_state(self.known_hands[i], self.hand, 10000 if i == winner else 0, True)
             return False
 
         self.player_turn = (self.player_turn + 1) % self.PLAYERS
-        self.hand = self.draw_card()
         agent = self.agents[self.player_turn]
+        self.hand = self.draw_card()
 
-        action = agent.prompt_action(self.known_hands[self.player_turn], self.hand, self.game_state, self.discard_pile[-1] if self.discard_pile else None, self.turn_count)
+        previous_value = calculate_state_value(self.known_hands[self.player_turn], self.player_turn)
+
+        # Get action and check validity
+        valid_action = False
+        invalid_attempts = 0
+
+        while not valid_action:
+            action = agent.prompt_action(self.known_hands[self.player_turn], self.hand,
+                                         self.game_state,
+                                         self.discard_pile[-1] if self.discard_pile else None,
+                                         self.turn_count)
+
+            # Validate action
+            valid_action = self.validate_action(action)
+
+            if not valid_action:
+                # Penalize agent for invalid move
+                agent.pass_state(self.known_hands[self.player_turn], self.hand, -10, False)
+                invalid_attempts += 1
+
+                # Prevent infinite loops if agent keeps making invalid moves
+                if invalid_attempts > 10:
+                    # Force a valid action (play card)
+                    action = 3
+                    valid_action = True
+
+        # Execute the valid action
         self.action_initial(action)
 
-        callback_action = agent.prompt_callback(self.known_hands[self.player_turn], self.open_action)
-        self.action_callback(callback_action)
+        # Handle callback action, also with validation
+        valid_callback = False
+        invalid_callback_attempts = 0
+
+        while not valid_callback and self.open_action is not None and self.open_action > 0:
+            callback_action = agent.prompt_callback(self.known_hands[self.player_turn], self.open_action)
+            valid_callback = self.validate_callback(callback_action)
+
+            if not valid_callback:
+                # Penalize agent for invalid callback
+                agent.pass_state(self.known_hands[self.player_turn], self.hand, -5, False)
+                invalid_callback_attempts += 1
+
+                # Prevent infinite loops
+                if invalid_callback_attempts > 10:
+                    # Force a valid callback (typically index 0)
+                    if self.open_action == 1 or self.open_action == 2:
+                        callback_action = 0
+                    elif self.open_action == 3 or self.open_action == 4:
+                        callback_action = (0, 0)
+                    valid_callback = True
+
+        if self.open_action is not None and self.open_action > 0:
+            self.action_callback(callback_action)
 
         self.flip_cards()
 
-        agent.pass_state(self.known_hands[self.player_turn], self.hand, 0, False)
+        reward = calculate_state_value(self.known_hands[self.player_turn], player_id=self.player_turn) - previous_value
+
+        # Bonus reward for completing a valid move
+        reward += 1
+
+        agent.pass_state(self.known_hands[self.player_turn], self.hand, reward, False)
         return True
+
+    def validate_action(self, action):
+        """Validates if the action is valid in the current game state"""
+        player = self.player_turn
+
+        # Action 3 (play card) and 4 (cambio) are always valid
+        if action == 3 or action == 4:
+            return True
+
+        # For actions 0-2 (swap with own card), check if index is valid
+        if 0 <= action < len(self.player_hands[player]):
+            return True
+
+        return False
+
+    def validate_callback(self, callback_action):
+        """Validates if the callback action is valid"""
+        player = self.player_turn
+        opponent = (player + 1) % self.PLAYERS
+
+        if self.open_action == 0:
+            # No callback needed
+            return True
+
+        elif self.open_action == 1:  # Peek own
+            # Check if target index is valid
+            return 0 <= callback_action < len(self.player_hands[player])
+
+        elif self.open_action == 2:  # Peek other
+            # Check if target index is valid
+            return 0 <= callback_action < len(self.player_hands[opponent])
+
+        elif self.open_action == 3 or self.open_action == 4:  # Swap actions
+            target1, target2 = callback_action
+            # Check if both indices are valid
+            return (0 <= target1 < len(self.player_hands[player]) and
+                    0 <= target2 < len(self.player_hands[opponent]))
+
+        return False
 
     def draw_card(self):
         """Returns the top card of the deck or shuffles the discard"""
@@ -189,7 +292,7 @@ class CambioEnv:
             highest_idx = -1
             unknown_idx = -1
 
-            for idx in range(self.HAND_SIZE):
+            for idx in range(len(self.player_hands[card_owner]) - 1):
                 card_info = self.known_hands[removing_player][opponent][idx]
 
                 if card_info is None and unknown_idx == -1:
@@ -205,7 +308,7 @@ class CambioEnv:
                 new_card = self.draw_card()
                 self.player_hands[opponent][replace_idx] = new_card
                 for p in range(self.PLAYERS):
-                    self.known_hands[p][opponent].pop(replace_idx)
+                    self.known_hands[p][opponent][card_idx] = None
 
         self.player_hands[card_owner].pop(card_idx)
 
@@ -235,25 +338,26 @@ class CambioEnv:
         opponent = (self.player_turn + 1) % self.PLAYERS
 
         if len(self.player_hands[player]) <= target_index:
-            raise ValueError("Invalid Target Index")
+            return False # Indicate action failed
 
         # Swap cards
         self.player_hands[player][target_index], self.hand = self.hand, self.player_hands[player][target_index]
         # Update known states
         self.known_hands[player][player][target_index] = self.player_hands[player][target_index]
         self.known_hands[opponent][player][target_index] = None
+
         # Play the card
         self.play_card()
-        return
+        return True
 
-    def peek_card(self, target_index):
+    def peek_card(self, target_index, player):
         """Lets a player look at a card"""
-        player = self.player_turn
         if len(self.player_hands[player]) <= target_index:
-            raise ValueError("Invalid Target Index")
+            return False
         # Update known state
         self.known_hands[player][player][target_index] = self.player_hands[player][target_index]
         self.open_action = None
+        return True
 
     def swap_card(self, target_index1, target_index2):
         """Performs a card swap with another player"""
@@ -261,7 +365,7 @@ class CambioEnv:
         opponent = (self.player_turn + 1) % self.PLAYERS
 
         if len(self.player_hands[player]) <= target_index1 or len(self.player_hands[opponent]) <= target_index2:
-            raise ValueError("Invalid Target Index")
+            return False
 
         # Swap Cards
         self.player_hands[player][target_index1], self.player_hands[opponent][target_index2] = self.player_hands[opponent][target_index2], self.player_hands[player][target_index1]
@@ -269,22 +373,36 @@ class CambioEnv:
         self.known_hands[player][player][target_index1], self.known_hands[player][opponent][target_index2] = self.known_hands[player][opponent][target_index2], self.known_hands[player][player][target_index1]
         self.known_hands[opponent][player][target_index1], self.known_hands[opponent][opponent][target_index2] = self.known_hands[opponent][opponent][target_index2], self.known_hands[opponent][player][target_index1]
         self.open_action = None
+        return True
 
     def cambio(self):
+        """Call cambio to end the game"""
         if self.game_state != CambioState.NOT_CALLED:
             return False
         self.game_state = CambioState.CALLED
         return True
 
+    def calculate_reward(self, player, previous_state):
+        pass
 
-start = time.time()
-t = CambioEnv(QAgent(0), QAgent(1), "half")
 
-t.reset()
-print(t)
-flag = True
-while flag:
-    flag = t.next_turn()
-    print(t)
-
-end = time.time()
+# start = time.time()
+# #t = CambioEnv(RandomAgent(0), DQNAgent(1, policy_path="DQNweights.weights.h5"))
+# t = CambioEnv(RandomAgent(0), RandomAgent(1))
+# won = 0
+# total = 0
+# for i in range(100000):
+#     t.reset()
+#     flag = True
+#     turn_cnt = 0
+#     while flag:
+#         turn_cnt += 1
+#         flag = t.next_turn()
+#     if 1 == np.argmax(t.tally_hands()):
+#         won += 1
+#     total += 1
+#
+# # t.agents[1].save_model("DQNweights.weights.h5")
+# end = time.time()
+# print(end-start)
+# print(f"Qagent won {won/total * 100}%")

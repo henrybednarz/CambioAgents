@@ -4,3 +4,4 @@ qagentclade.py
 .DS_Store
 .idea
 .gitignore
+.weight.h5
