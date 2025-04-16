@@ -1,7 +1,6 @@
 __pycache__/
 venv-3.11/
-qagentclade.py
 .DS_Store
 .idea
 .gitignore
-.weight.h5
+trained_weights

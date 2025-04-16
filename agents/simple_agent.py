@@ -1,12 +1,10 @@
 import random
-from agent import Agent
 from util import CambioState
 
 
 class SimpleHeuristicAgent:
-    def __init__(self, num):
-        self.num = num
-
+    def __init__(self):
+        pass
     def prompt_action(self, state, hand, game_state, top_discard, turn_count, valid_actions=None):
         known_cards = state[1]
 
@@ -25,10 +23,9 @@ class SimpleHeuristicAgent:
         # If hand is low, call cambio (simple trigger rule)
         if hand[1] < 7 and game_state is CambioState.NOT_CALLED:
             return 4
-
         return 3
 
-    def prompt_callback(self, state, open_action, valid_actions=None):
+    def prompt_callback(self, state, open_action, valid_actions):
         if open_action == 1:
             return random.choice(valid_actions)
         elif open_action == 2:
@@ -36,10 +33,4 @@ class SimpleHeuristicAgent:
         elif open_action in [3, 4]:
             return random.choice(valid_actions)
         return 20
-
-    def clear_memory(self):
-        pass
-
-    def change_num(self):
-        pass
 

@@ -2,8 +2,8 @@ import gymnasium as gym
 import numpy as np
 import random
 from gymnasium import spaces
-from util import build_deck, CambioState, est_hand_value, known_ratio, est_state_value, hand_value
-from DQN_agent import DQNAgent
+from util import build_deck, CambioState, est_hand_value, known_ratio, hand_value
+from agents.dqn_agent import DQNAgent
 
 """
 ACTION LIST
@@ -183,22 +183,16 @@ class CambioEnv(gym.Env):
         return valid_actions
 
     def _calculate_reward(self):
-        # Get the current estimated hand value for the agent
         player_hand_value = est_hand_value(self.known_hands[0][0])
 
-        # Calculate reward based on hand value - lower is better
-        # Normalize to a reasonable range (assuming max hand value is 39)
         hand_value_reward = (39 - player_hand_value) / 39.0 * 3.0
 
-        # If the game is over, calculate final reward based on outcome
         if self.game_over:
             agent_score, opp_score = self._tally_hands()
             if agent_score < opp_score:  # Agent wins
                 return 50.0
             else:  # Agent loses
                 return -20.0
-
-        # Small bonus for calling Cambio when hand value is good
         if self.game_state is CambioState.CALLED:
             if player_hand_value <= max((12 - self.turn_count), 5):
                 hand_value_reward += 10.0

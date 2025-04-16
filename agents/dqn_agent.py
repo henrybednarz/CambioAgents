@@ -5,7 +5,6 @@ from tensorflow.keras.models import Sequential, Model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.losses import Huber
-import random
 from collections import deque
 
 
@@ -42,11 +41,11 @@ class DQNAgent:
         self.update_frequency = update_frequency
         self.use_double_dqn = True
 
-        self.priority_alpha = 0.6  # Priority exponent
-        self.priority_beta = 0.4  # Importance sampling exponent
+        self.priority_alpha = 0.6
+        self.priority_beta = 0.4
         self.priority_epsilon = 1e-6
 
-        self.memory = deque(maxlen=50000) # For the replay buffer
+        self.memory = deque(maxlen=50000)
         self.priorities = deque(maxlen=50000)
 
         self.model = self._build_model()
@@ -68,26 +67,6 @@ class DQNAgent:
         optimizer = Adam(learning_rate=self.learning_rate)
         model.compile(loss='huber', optimizer=optimizer)
 
-        return model
-
-    def _build_model2(self):
-        lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-            initial_learning_rate=0.0001,
-            decay_steps=1000,
-            decay_rate=0.9,
-            staircase=True)
-
-        model = Sequential()
-        model.add(Input(shape=(self.state_size,)))
-        model.add(Dense(128, activation='relu', kernel_regularizer=l2(0.001)))
-        model.add(BatchNormalization())
-        model.add(Dense(256, activation='relu', kernel_regularizer=l2(0.001)))
-        model.add(BatchNormalization())
-        model.add(Dense(256, activation='relu', kernel_regularizer=l2(0.001)))
-        model.add(BatchNormalization())
-        model.add(Dense(256, activation='relu', kernel_regularizer=l2(0.001)))
-        model.add(Dense(self.action_size, activation='linear'))
-        model.compile(loss='huber', optimizer=Adam(learning_rate=lr_schedule))
         return model
 
     def act(self, state, valid_actions=None, training=False):
@@ -113,16 +92,13 @@ class DQNAgent:
         self.priorities.append(max_priority)
 
     def replay_sample(self):
-        # Calculate sampling probabilities based on priorities
         priorities = np.array(self.priorities)
         probabilities = priorities ** self.priority_alpha
         probabilities /= np.sum(probabilities)
 
-        # Sample batch with priorities
         batch_indices = np.random.choice(len(self.memory), self.batch_size, p=probabilities)
         batch_sample = [self.memory[i] for i in batch_indices]
 
-        # Calculate importance sampling weights
         importance = 1.0 / (len(self.memory) * probabilities[batch_indices])
         importance = importance ** self.priority_beta
         importance /= np.max(importance)

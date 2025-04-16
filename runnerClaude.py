@@ -1,20 +1,16 @@
-import time
-import gymnasium as gym
-from gymnasium.core import ObsType, WrapperObsType
 from cambio_env import CambioEnv
 import numpy as np
-from random_agent import RandomAgent
+from agents.random_agent import RandomAgent
 from tqdm import tqdm
 import os
 import matplotlib.pyplot as plt
-from DQN_agent import DQNAgent  # Import your improved DQN agent
-from simple_agent import SimpleHeuristicAgent
+from agents.dqn_agent import DQNAgent  # Import your improved DQN agent
 
 
 def run_games(save_path, num_games=10000, training=True, save_interval=500):
     agent = DQNAgent()
     # agent.load("trained_weights/72at10k.weights.h5")
-    opponent = RandomAgent(1)
+    opponent = RandomAgent()
     env = CambioEnv(opponent)
 
     losses = []
@@ -182,7 +178,7 @@ def plot_learning_curves(rewards, losses, win_rates, epsilon_values, eval_interv
     plt.ylabel('Epsilon')
 
     plt.tight_layout()
-    plt.savefig('learning_curves.png')
+    plt.savefig('dqn_randomagent.png')
     plt.close()
 
 
@@ -201,7 +197,7 @@ def main():
 def eval_file(file_name):
     agent = DQNAgent()
     agent.load("trained_weights/" + file_name + ".weights.h5")
-    opponent = RandomAgent(1)
+    opponent = RandomAgent()
     win_rate = evaluate_agent(agent, opponent, 1000)
     print(f"Final evaluation over 1000 games: Win rate = {win_rate * 100:.2f}%")
 
