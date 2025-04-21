@@ -13,7 +13,7 @@ class DQNAgent:
                  state_size=28,
                  action_size=21,
                  learning_rate=0.00005,
-                 gamma=0.97,
+                 gamma=0.85,
                  epsilon=0.5,
                  epsilon_min=0.05,
                  epsilon_decay=0.9999,
@@ -184,4 +184,5 @@ class DQNAgent:
         self.target_model.load_weights(file_name)
 
     def save(self, save_path):
+        
         self.model.save_weights(save_path)

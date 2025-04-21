@@ -2,5 +2,10 @@ __pycache__/
 venv-3.11/
 .DS_Store
 .idea
+.Idea
 .gitignore
 trained_weights
+hyperparameter_tuning
+trained_weights
+saved_weights
+.png

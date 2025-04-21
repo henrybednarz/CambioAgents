@@ -8,6 +8,7 @@ from cambio_env import CambioEnv
 from agents.agent import Agent
 from agents.simple_agent import SimpleHeuristicAgent
 from agents.random_agent import RandomAgent
+from agents.mcts_agent import MCTSAgent
 from agents.dqn_agent import DQNAgent
 
 

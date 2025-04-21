@@ -5,10 +5,11 @@ from tqdm import tqdm
 import os
 import matplotlib.pyplot as plt
 from agents.dqn_agent import DQNAgent  # Import your improved DQN agent
+from agents.simple_agent import SimpleHeuristicAgent
 
 
-def run_games(save_path, num_games=10000, training=True, save_interval=500):
-    agent = DQNAgent()
+def run_games(save_path, num_games=5000, training=True, save_interval=500):
+    agent = DQNAgent(gamma=0.85, learning_rate=0.00001, epsilon=0.3)
     # agent.load("trained_weights/72at10k.weights.h5")
     opponent = RandomAgent()
     env = CambioEnv(opponent)
@@ -23,7 +24,7 @@ def run_games(save_path, num_games=10000, training=True, save_interval=500):
 
     # Training checkpoints
     best_win_rate = 0.0
-    evaluation_interval = 500  # Evaluate every 500 episodes
+    evaluation_interval = 100  # Evaluate every 500 episodes
 
     for episode in tqdm(range(num_games), desc="Training" if training else "Testing", unit="games"):
         total_reward = 0
@@ -65,7 +66,6 @@ def run_games(save_path, num_games=10000, training=True, save_interval=500):
         epsilon_values.append(agent.epsilon)
 
         if (episode + 1) % evaluation_interval == 0 and training:
-            # Temporarily save weights
             temp_weights_path = "trained_weights/temp_weights.weights.h5"
             agent.save(temp_weights_path)
 
@@ -78,13 +78,11 @@ def run_games(save_path, num_games=10000, training=True, save_interval=500):
             print(
                 f"Win Rate: {win_rate * 100:.2f}% | Avg Reward: {avg_reward:.2f} | Avg Loss: {avg_loss:.4f} | Epsilon: {agent.epsilon:.4f}")
 
-            # Save best model
             if win_rate > best_win_rate:
                 best_win_rate = win_rate
                 agent.save("trained_weights/best_" + save_path)
                 print(f"New best model saved with win rate: {best_win_rate * 100:.2f}%")
 
-            # Save periodic checkpoint
             if (episode + 1) % save_interval == 0:
                 agent.save(f"trained_weights/checkpoint_{episode+1}_{save_path}")
 
@@ -111,7 +109,7 @@ def evaluate_agent(agent, opponent, num_games=100):
 
     # Store original epsilon to restore it later
     original_epsilon = agent.epsilon
-    agent.epsilon = 0  # No exploration during evaluation
+    agent.epsilon = 0
 
     for _ in range(num_games):
         state, info = env.reset()
@@ -153,7 +151,6 @@ def plot_learning_curves(rewards, losses, win_rates, epsilon_values, eval_interv
     plt.xlabel('Episode')
     plt.ylabel('Reward')
 
-    # Plot losses
     plt.subplot(2, 2, 2)
     if losses:
         plt.plot(np.convolve(losses, np.ones(100) / 100, mode='valid'))
@@ -161,7 +158,6 @@ def plot_learning_curves(rewards, losses, win_rates, epsilon_values, eval_interv
         plt.xlabel('Episode')
         plt.ylabel('Loss')
 
-    # Plot win rates
     plt.subplot(2, 2, 3)
     eval_episodes = [i * eval_interval for i in range(len(win_rates))]
     plt.plot(eval_episodes, win_rates, 'ro-')
@@ -178,18 +174,19 @@ def plot_learning_curves(rewards, losses, win_rates, epsilon_values, eval_interv
     plt.ylabel('Epsilon')
 
     plt.tight_layout()
-    plt.savefig('dqn_randomagent.png')
+    plt.savefig('dqn_opt_params.png')
     plt.close()
 
 
 def main():
     # Training phase
     print("Starting training...")
-    agent = run_games("cambio_dqn_weights.weights.h5", num_games=10000, training=True)
+    # agent = run_games("cambio_dqn_weights.weights.h5", num_games=5000, training=True)
+    agent = run_games("dqn_opt2_params.weights.h5", num_games=2000, training=True)
 
     # Full evaluation phase
     print("\nFinal evaluation...")
-    opponent = RandomAgent(1)
+    opponent = RandomAgent()
     final_win_rate = evaluate_agent(agent, opponent, 1000)
     print(f"Final evaluation over 1000 games: Win rate = {final_win_rate * 100:.2f}%")
 
@@ -203,8 +200,8 @@ def eval_file(file_name):
 
 
 if __name__ == "__main__":
-    # main()
-    # print("cambio_dqn_weights")
-    eval_file("checkpoint_7500_cambio_dqn_weights")
-    # # print("best_cambio_dqn_weights")
-    eval_file("checkpoint_8000_cambio_dqn_weights")
+    main()
+    # agent = DQNAgent()
+    # agent.load("../trained_weights/checkpoint_4000_dqn_opt_params.weights.h5")
+    # opponent = RandomAgent
+    # evaluate_agent(agent, opponent, num_games=1000)

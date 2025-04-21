@@ -4,6 +4,7 @@ import random
 from gymnasium import spaces
 from util import build_deck, CambioState, est_hand_value, known_ratio, hand_value
 from agents.dqn_agent import DQNAgent
+from agents.mcts_agent import MCTSAgent
 
 """
 ACTION LIST
@@ -76,7 +77,7 @@ class CambioEnv(gym.Env):
             self.known_hands[p][p][1] = self.player_hands[p][1]
 
         self.hand = self._draw_card()
-        info = {'valid_actions': self._get_valid_actions(), 'callback': False}
+        info = self._get_info()
         return self._get_observation(), info
 
     def step(self, action):
@@ -86,11 +87,9 @@ class CambioEnv(gym.Env):
         info = {}
 
         if self.game_over:
-            info['final_tally'] = self._tally_hands()
-            info['callback'] = False
             reward = self._calculate_reward_handknown(0, 0)
-            return self._get_observation(), reward, self.game_over, False, info
-        # prev_value = est_state_value(self.known_hands[0])
+            return self._get_observation(), reward, self.game_over, False, self._get_info()
+        prev_hand_value = est_hand_value(self.known_hands[0][0])
 
         self._handle_action(action)
         self._flip_cards()
@@ -103,14 +102,9 @@ class CambioEnv(gym.Env):
             self.hand = self._draw_card()
 
         # cur_value = est_state_value(self.known_hands[1])
-        reward = self._calculate_reward()
-        info['valid_actions'] = self._get_valid_actions()
-        info['callback'] = True if self.open_action is not None else False
+        reward = self._calculate_reward(prev_hand_value)
 
-        if self.game_over:
-            info['final_tally'] = self._tally_hands()
-
-        return self._get_observation(), reward, self.game_over, False, info
+        return self._get_observation(), reward, self.game_over, False, self._get_info()
 
     def step_opponent(self):
         """Process the opponent's turn using prompt_action and prompt_callback."""
@@ -121,6 +115,8 @@ class CambioEnv(gym.Env):
         agent = self.opponent
         if type(agent) is DQNAgent:
             action = agent.act(self._get_observation(), self._get_valid_actions(), training=False)
+        elif type(agent) is MCTSAgent:
+            action = agent.select_action(self._get_info(), self)
         else:
             action = agent.prompt_action(
                 self.known_hands[opponent],
@@ -143,13 +139,11 @@ class CambioEnv(gym.Env):
 
         self._flip_cards()
         self._update_game_state()
+
         if not self.game_over:
             self.hand = self._draw_card()
 
-        info = {'valid_actions': self._get_valid_actions(), 'callback': False}
-        if self.game_over:
-            info['final_tally'] = self._tally_hands()
-        return self._get_observation(), info
+        return self._get_observation(), self._get_info()
 
     def _get_valid_actions(self):
         """Returns list of currently valid actions"""
@@ -182,46 +176,19 @@ class CambioEnv(gym.Env):
 
         return valid_actions
 
-    def _calculate_reward(self):
+    def _calculate_reward(self, prev_hand_value):
         player_hand_value = est_hand_value(self.known_hands[0][0])
 
-        hand_value_reward = (39 - player_hand_value) / 39.0 * 3.0
+        hand_value_reward = (player_hand_value - prev_hand_value) / 13.0 * 10.0
 
         if self.game_over:
             agent_score, opp_score = self._tally_hands()
             if agent_score < opp_score:  # Agent wins
-                return 50.0
-            else:  # Agent loses
-                return -20.0
-        if self.game_state is CambioState.CALLED:
-            if player_hand_value <= max((12 - self.turn_count), 5):
-                hand_value_reward += 10.0
+                return 20.0
+            else:
+                return -5.0
 
         return hand_value_reward
-
-    def _calculate_reward_handknown(self, prev_score, cur_score):
-        player_known = known_ratio(self.known_hands[0][0])
-        opp_known = known_ratio(self.known_hands[0][1])
-        knowledge_reward = (player_known - 0.67) * 2 + (opp_known - 0.34) * 0.2
-
-        score_reward = (cur_score - prev_score) * 0.5
-
-        if self.game_over:
-            agent_score, opp_score = self._tally_hands()
-            if agent_score < opp_score:
-                return 55.0
-            else:
-                return -20.0
-        reward = knowledge_reward + score_reward
-        if self.game_state is CambioState.LAST_TURN:
-            reward *= 1.5
-        if self.game_state is CambioState.CALLED:
-            if hand_value(self.known_hands[0][0]) <= max((12 - self.turn_count), 5):
-                reward += 5.0
-            else:
-                reward -= 10.0
-
-        return reward
 
     def _draw_card(self):
         """Returns top card of the deck, ends the game if deck is empty"""
@@ -437,3 +404,40 @@ class CambioEnv(gym.Env):
             cards_in_deck,
         ])
         return obs
+
+    def _get_info(self):
+        info = {'callback': True if self.open_action is not None else False,
+                'valid_actions': self._get_valid_actions(),
+                'final_tally': self._tally_hands() if self.game_over else None}
+        return info
+
+    def get_env_state(self):
+        """Return a representation of the current env state."""
+        return {
+            'deck': self.deck.copy(),
+            'player_hands': [[card[:] for card in hand] for hand in self.player_hands],
+            'known_hands': [[[card[:] if card else None for card in player]
+                             for player in players] for players in self.known_hands],
+            'discard_pile': self.discard_pile.copy(),
+            'turn_count': self.turn_count,
+            'player_turn': self.player_turn,
+            'hand': self.hand[:] if self.hand else None,
+            'open_action': self.open_action,
+            'game_state': self.game_state,
+            'game_over': self.game_over
+        }
+
+    def load_env_state(self, state):
+        """Load a saved environment state."""
+        self.deck = state['deck'].copy()
+        self.player_hands = [[card[:] for card in hand] for hand in state['player_hands']]
+        self.known_hands = [[[card[:] if card else None for card in player]
+                             for player in players] for players in state['known_hands']]
+        self.discard_pile = state['discard_pile'].copy()
+        self.turn_count = state['turn_count']
+        self.player_turn = state['player_turn']
+        self.hand = state['hand'][:] if state['hand'] else None
+        self.open_action = state['open_action']
+        self.game_state = state['game_state']
+        self.game_over = state['game_over']
+

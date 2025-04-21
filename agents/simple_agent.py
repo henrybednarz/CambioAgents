@@ -25,6 +25,7 @@ class SimpleHeuristicAgent:
             return 4
         return 3
 
+
     def prompt_callback(self, state, open_action, valid_actions):
         if open_action == 1:
             return random.choice(valid_actions)
